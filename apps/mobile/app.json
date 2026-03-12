@@ -1,0 +1,23 @@
+﻿{
+  "expo": {
+    "name": "neur_eye_fisio",
+    "slug": "neur-eye-fisio-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#DCE2E6"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
