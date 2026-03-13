@@ -1,4 +1,5 @@
-﻿export type RootStackParamList = {
+export type RootStackParamList = {
+  Login: undefined;
   SessionsList: undefined;
   CreateSession: undefined;
   TestExecution: { sessionId: string };

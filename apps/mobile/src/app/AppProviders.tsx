@@ -1,6 +1,7 @@
-﻿import type { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AuthProvider } from '@/store/auth-context';
 
 interface AppProvidersProps {
   children: ReactNode;
@@ -9,7 +10,9 @@ interface AppProvidersProps {
 export function AppProviders({ children }: AppProvidersProps) {
   return (
     <SafeAreaProvider>
-      <NavigationContainer>{children}</NavigationContainer>
+      <AuthProvider>
+        <NavigationContainer>{children}</NavigationContainer>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

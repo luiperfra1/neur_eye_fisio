@@ -46,3 +46,17 @@ npm run start
 npm run android
 npm run web
 ```
+
+## Configuracion API (backend real)
+
+Crear `apps/mobile/.env` con:
+
+```env
+EXPO_PUBLIC_API_BASE_URL=http://localhost:3001/api
+```
+
+Si pruebas desde dispositivo fisico en la misma red, usa la IP LAN del equipo backend, por ejemplo:
+
+```env
+EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:3001/api
+```

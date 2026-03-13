@@ -1,13 +1,14 @@
-import { useState, useCallback } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-
 import { AppTopBar } from '@/components/common/AppTopBar';
 import { CaptureStatusPill } from '@/components/common/CaptureStatusPill';
 import { InfoCell } from '@/components/common/InfoGrid';
 import { CLINICAL_COLORS as C, elev, getCaptureStatusColor, withAlpha } from '@/constants/clinicalTheme';
 import type { RootStackParamList } from '@/navigation/types';
+import { ApiError } from '@/services/apiClient';
 import {
   formatDuration,
   getSessionById,
@@ -15,19 +16,57 @@ import {
   getSessionTotalDuration,
   getSessionTotalScore,
 } from '@/services/sessionService';
+import type { Session } from '@/types/session';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SessionSummary'>;
 
 export function SessionSummaryScreen({ navigation, route }: Props) {
   const { sessionId } = route.params;
-  const session = getSessionById(sessionId);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorText(null);
+      const data = await getSessionById(sessionId);
+      setSession(data);
+      const sections = getSessionSections(data);
+      setOpenSections(Object.fromEntries(sections.map((section, index) => [section.id, index === 0])));
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setErrorText(`Error ${error.status}: ${error.message}`);
+      } else {
+        setErrorText('No se pudo cargar el resumen.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <View style={s.errorScreen}>
+          <ActivityIndicator size="small" color={C.primary} />
+          <Text style={s.errorSub}>Cargando resumen...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!session) {
     return (
       <SafeAreaView style={s.root} edges={['top']}>
         <View style={s.errorScreen}>
           <Text style={s.errorTitle}>Sesión no encontrada</Text>
-          <Text style={s.errorSub}>No se pudo cargar el resumen.</Text>
+          <Text style={s.errorSub}>{errorText ?? 'No se pudo cargar el resumen.'}</Text>
           <Pressable style={s.errorBtn} onPress={() => navigation.popToTop()}>
             <Text style={s.errorBtnTxt}>Volver al inicio</Text>
           </Pressable>
@@ -36,18 +75,10 @@ export function SessionSummaryScreen({ navigation, route }: Props) {
     );
   }
 
-  const sections = getSessionSections(sessionId);
+  const sections = getSessionSections(session);
   const totalScore = getSessionTotalScore(session);
   const totalDuration = getSessionTotalDuration(session);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(sections.map((section, index) => [section.id, index === 0]))
-  );
-
-  const toggleSection = useCallback((id: string) => {
-    setOpenSections(previous => ({ ...previous, [id]: !previous[id] }));
-  }, []);
-
-  const completedTests = session.tests.filter(test => test.score !== null).length;
+  const completedTests = session.tests.filter((test) => test.score !== null).length;
   const totalTests = session.tests.length;
   const percent = totalTests > 0 ? Math.round((completedTests / totalTests) * 100) : 0;
 
@@ -55,7 +86,7 @@ export function SessionSummaryScreen({ navigation, route }: Props) {
     <SafeAreaView style={s.root} edges={['top']}>
       <AppTopBar
         title="Resumen de sesión"
-        subtitle={`Paciente ${session.patientId} · ${session.scaleName}`}
+        subtitle={`Paciente ${session.patientId} · ${session.scaleCode}`}
         onBack={() => navigation.goBack()}
         right={<StatusDot status={session.status} />}
       />
@@ -71,7 +102,7 @@ export function SessionSummaryScreen({ navigation, route }: Props) {
 
         <View style={s.progressWrap}>
           <View style={s.progressTrack}>
-            <View style={[s.progressFill, { width: `${percent}%` as any }]} />
+            <View style={[s.progressFill, { width: `${percent}%` as never }]} />
           </View>
           <Text style={s.progressLabel}>{percent}% completado</Text>
         </View>
@@ -87,61 +118,68 @@ export function SessionSummaryScreen({ navigation, route }: Props) {
               <InfoCell label="Escala" value={session.scaleName} />
               <InfoCell label="Paciente" value={session.patientId} />
             </GridRow>
+            <GridRow>
+              <InfoCell label="Usuario" value={session.userId} />
+              <InfoCell label="Inicio" value={new Date(session.startedAt).toLocaleDateString('es-ES')} />
+            </GridRow>
           </View>
         </View>
 
         {sections.map((section, sectionIndex) => {
           const isOpen = !!openSections[section.id];
-          const completed = section.tests.filter((test: any) => test.score !== null).length;
+          const completed = section.tests.filter((test) => test.score !== null).length;
           const total = section.tests.length;
           const allDone = completed === total;
 
           return (
             <View key={section.id} style={s.card}>
-              <Pressable onPress={() => toggleSection(section.id)} style={s.sectionHeader}>
+              <Pressable
+                onPress={() => setOpenSections((prev) => ({ ...prev, [section.id]: !prev[section.id] }))}
+                style={s.sectionHeader}
+              >
                 <View style={[s.sectionIndex, allDone && s.sectionIndexDone]}>
                   <Text style={[s.sectionIndexTxt, allDone && s.sectionIndexTxtDone]}>{sectionIndex + 1}</Text>
                 </View>
                 <View style={s.sectionHeaderCenter}>
                   <Text style={s.sectionTitle}>{section.name}</Text>
-                  <Text style={s.sectionMeta}>{completed}/{total} pruebas completadas</Text>
+                  <Text style={s.sectionMeta}>
+                    {completed}/{total} pruebas completadas
+                  </Text>
                 </View>
                 <View style={s.sectionHeaderRight}>
-                  {allDone && <Text style={s.allDoneBadge}>✓</Text>}
+                  {allDone ? <Text style={s.allDoneBadge}>✓</Text> : null}
                   <Text style={s.chevron}>{isOpen ? '▲' : '▼'}</Text>
                 </View>
               </Pressable>
 
-              {isOpen && (
+              {isOpen ? (
                 <View style={s.sectionBody}>
-                  {section.tests.map((test: any, testIndex: number) => (
+                  {section.tests.map((test, testIndex) => (
                     <TestRow
                       key={test.id}
                       test={test}
                       isLast={testIndex === section.tests.length - 1}
-                      onViewTranscription={() =>
-                        navigation.navigate('Transcription', { sessionId: session.id, testId: test.id })
-                      }
+                      onViewTranscription={() => navigation.navigate('Transcription', { sessionId: session.id, testId: test.id })}
                     />
                   ))}
                 </View>
-              )}
+              ) : null}
             </View>
           );
         })}
-
-        <View style={{ height: 16 }} />
       </ScrollView>
 
       <View style={s.bottomBar}>
         <View style={s.bottomLeft}>
-          <Text style={s.bottomScore}>{totalScore} <Text style={s.bottomScoreLabel}>pts</Text></Text>
+          <Text style={s.bottomScore}>
+            {totalScore} <Text style={s.bottomScoreLabel}>pts</Text>
+          </Text>
           <Text style={s.bottomDuration}>{formatDuration(totalDuration)}</Text>
         </View>
         <Pressable style={[s.actBtn, s.actOutline]} onPress={() => navigation.popToTop()}>
           <Text style={[s.actTxt, s.actTxtOutline]}>Volver</Text>
         </Pressable>
-        <Pressable style={[s.actBtn, s.actFilled]} onPress={() => {}}>
+        <Pressable style={[s.actBtn, s.actFilled]} onPress={() => navigation.navigate('SessionsList')}>
           <Text style={[s.actTxt, s.actTxtFilled]}>Confirmar sesión ✓</Text>
         </Pressable>
       </View>
@@ -154,7 +192,7 @@ function TestRow({
   isLast,
   onViewTranscription,
 }: {
-  test: any;
+  test: Session['tests'][number];
   isLast: boolean;
   onViewTranscription: () => void;
 }) {
@@ -163,17 +201,19 @@ function TestRow({
 
   return (
     <View style={[tr.wrap, !isLast && tr.wrapBorder]}>
-      <Pressable style={tr.header} onPress={() => setExpanded(value => !value)}>
+      <Pressable style={tr.header} onPress={() => setExpanded((value) => !value)}>
         <View style={[tr.scoreBubble, scored ? tr.scoreBubbleDone : tr.scoreBubbleEmpty]}>
           <Text style={[tr.scoreBubbleTxt, scored ? tr.scoreBubbleTxtDone : tr.scoreBubbleTxtEmpty]}>
-            {scored ? test.score : '–'}
+            {scored ? test.score : '-'}
           </Text>
         </View>
         <View style={tr.headerCenter}>
-          <Text style={tr.name} numberOfLines={expanded ? undefined : 1}>{test.name}</Text>
+          <Text style={tr.name} numberOfLines={expanded ? undefined : 1}>
+            {test.name}
+          </Text>
           <Text style={tr.meta}>
             {formatDuration(test.durationSec)}
-            {test.note?.trim() ? '  ·  nota' : ''}
+            {test.note?.trim() ? ' · nota' : ''}
           </Text>
         </View>
         <View style={tr.headerRight}>
@@ -182,7 +222,7 @@ function TestRow({
         </View>
       </Pressable>
 
-      {expanded && (
+      {expanded ? (
         <View style={tr.detail}>
           {test.note?.trim() ? (
             <View style={tr.noteBox}>
@@ -190,17 +230,15 @@ function TestRow({
               <Text style={tr.noteText}>{test.note}</Text>
             </View>
           ) : null}
-
           <View style={tr.badgeRow}>
             <CaptureStatusPill label="Audio" status={test.audio.status} />
             <CaptureStatusPill label="STT" status={test.transcription.status} />
           </View>
-
           <Pressable style={tr.transcriptBtn} onPress={onViewTranscription}>
             <Text style={tr.transcriptTxt}>Ver transcripción →</Text>
           </Pressable>
         </View>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -214,13 +252,13 @@ function StatBox({ label, value, accent }: { label: string; value: string; accen
   );
 }
 
-function GridRow({ children }: { children: React.ReactNode }) {
+function GridRow({ children }: { children: ReactNode }) {
   return <View style={gr.row}>{children}</View>;
 }
 
-function StatusDot({ status }: { status: string }) {
-  const color = status === 'COMPLETED' ? C.success : status === 'PAUSED' ? C.warning : C.primary;
-  const label = status === 'COMPLETED' ? 'Finalizada' : status === 'PAUSED' ? 'Pausada' : 'En curso';
+function StatusDot({ status }: { status: Session['status'] }) {
+  const color = status === 'completed' ? C.success : status === 'cancelled' ? C.warning : C.primary;
+  const label = status === 'completed' ? 'Finalizada' : status === 'cancelled' ? 'Cancelada' : 'En curso';
   return (
     <View style={[sd.wrap, { borderColor: withAlpha(color, '55') }]}>
       <View style={[sd.dot, { backgroundColor: color }]} />
@@ -309,9 +347,9 @@ const s = StyleSheet.create({
   actTxt: { fontSize: 13, fontWeight: '700' },
   actTxtOutline: { color: C.secondary },
   actTxtFilled: { color: C.white },
-  errorScreen: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  errorScreen: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 10 },
   errorTitle: { fontSize: 20, fontWeight: '700', color: C.textPrimary, marginBottom: 8 },
-  errorSub: { fontSize: 15, color: C.textSecondary, textAlign: 'center', marginBottom: 24 },
+  errorSub: { fontSize: 15, color: C.textSecondary, textAlign: 'center' },
   errorBtn: { backgroundColor: C.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 },
   errorBtnTxt: { fontSize: 15, fontWeight: '700', color: C.white },
 });
@@ -367,7 +405,16 @@ const gr = StyleSheet.create({
 });
 
 const sd = StyleSheet.create({
-  wrap: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20, borderWidth: 1, backgroundColor: 'rgba(255,255,255,0.12)' },
+  wrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
   dot: { width: 6, height: 6, borderRadius: 3 },
   txt: { fontSize: 11, fontWeight: '700' },
 });

@@ -1,5 +1,6 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Pressable,
   ScrollView,
@@ -12,7 +13,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-
 import { AppTopBar } from '@/components/common/AppTopBar';
 import { CaptureStatusPill } from '@/components/common/CaptureStatusPill';
 import { InfoCell, InfoGrid } from '@/components/common/InfoGrid';
@@ -20,45 +20,79 @@ import { SidebarShell } from '@/components/common/SidebarShell';
 import { CLINICAL_COLORS as C, CLINICAL_LAYOUT, elev } from '@/constants/clinicalTheme';
 import { LAYOUT } from '@/constants/theme';
 import type { RootStackParamList } from '@/navigation/types';
+import { ApiError } from '@/services/apiClient';
 import {
+  completeSession,
   formatDuration,
   getAdjacentTestId,
   getCurrentTestIndex,
   getSessionById,
   getSessionProgress,
   getSessionSections,
-  setCurrentTest,
-  setSessionStatus,
-  updateSessionTest,
+  upsertSessionTestResult,
 } from '@/services/sessionService';
+import type { Session } from '@/types/session';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TestExecution'>;
 
 const SIDEBAR_W = CLINICAL_LAYOUT.sidebarWidth;
-const SCORE_OPTIONS = [0, 1, 2, 3, 4];
 
 export function TestExecutionScreen({ navigation, route }: Props) {
   const { sessionId } = route.params;
   const { width } = useWindowDimensions();
   const isTablet = width >= LAYOUT.tabletBreakpoint;
-
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [session, setSession] = useState<Session | null>(null);
+  const [currentTestId, setCurrentTestId] = useState<string>('');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const sidebarX = useRef(new Animated.Value(-SIDEBAR_W)).current;
 
-  const session = useMemo(() => getSessionById(sessionId), [refreshKey, sessionId]);
-  const currentTest = session?.tests.find(test => test.id === session.currentTestId);
-  const progress = session ? getSessionProgress(session) : { completed: 0, total: 0, percent: 0 };
-  const currentIndex = session ? getCurrentTestIndex(session) : -1;
-  const sections = useMemo(() => getSessionSections(sessionId), [refreshKey, sessionId]);
+  const loadSession = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorText(null);
+      const data = await getSessionById(sessionId);
+      setSession(data);
+      const defaultTest = data.tests.find((test) => test.status !== 'completed') ?? data.tests[0];
+      setCurrentTestId((prev) => prev || defaultTest?.id || '');
+      setNoteDraft((prev) => (prev.length > 0 ? prev : defaultTest?.note ?? ''));
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setErrorText(`Error ${error.status}: ${error.message}`);
+      } else {
+        setErrorText('No se pudo cargar la sesión.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId]);
 
-  const [noteDraft, setNoteDraft] = useState(currentTest?.note ?? '');
+  useEffect(() => {
+    void loadSession();
+  }, [loadSession]);
+
+  const currentTest = useMemo(
+    () => session?.tests.find((test) => test.id === currentTestId),
+    [currentTestId, session],
+  );
+  const sections = useMemo(() => (session ? getSessionSections(session) : []), [session]);
+  const progress = useMemo(
+    () => (session ? getSessionProgress(session) : { completed: 0, total: 0, percent: 0 }),
+    [session],
+  );
+  const currentIndex = useMemo(
+    () => (session && currentTestId ? getCurrentTestIndex(session, currentTestId) : -1),
+    [currentTestId, session],
+  );
 
   useEffect(() => {
     setNoteDraft(currentTest?.note ?? '');
-  }, [currentTest?.id]);
+  }, [currentTest?.id, currentTest?.note]);
 
   const openSidebar = useCallback(() => {
     setSidebarOpen(true);
@@ -75,30 +109,83 @@ export function TestExecutionScreen({ navigation, route }: Props) {
     ]).start(() => setSidebarOpen(false));
   }, [backdropOpacity, sidebarX]);
 
-  const refresh = useCallback(() => setRefreshKey(value => value + 1), []);
+  const saveScore = useCallback(
+    async (score: number) => {
+      if (!currentTest) return;
+      try {
+        setSaving(true);
+        await upsertSessionTestResult(sessionId, currentTest.scaleTestId, {
+          scoreValue: score,
+          status: 'completed',
+          notes: noteDraft,
+        });
+        await loadSession();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          setErrorText(`Error ${error.status}: ${error.message}`);
+        } else {
+          setErrorText('No se pudo guardar la puntuación.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [currentTest, loadSession, noteDraft, sessionId],
+  );
 
-  const goToTest = useCallback((testId: string) => {
-    setCurrentTest(sessionId, testId);
-    const updated = getSessionById(sessionId);
-    const selected = updated?.tests.find(test => test.id === testId);
-    setNoteDraft(selected?.note ?? '');
-    refresh();
-    if (!isTablet) closeSidebar();
-  }, [closeSidebar, isTablet, refresh, sessionId]);
+  const saveNote = useCallback(async () => {
+    if (!currentTest) return;
+    try {
+      await upsertSessionTestResult(sessionId, currentTest.scaleTestId, { notes: noteDraft });
+      await loadSession();
+    } catch {
+      setErrorText('No se pudo guardar la nota.');
+    }
+  }, [currentTest, loadSession, noteDraft, sessionId]);
 
-  const moveTest = useCallback((dir: 'prev' | 'next') => {
-    const updated = getSessionById(sessionId);
-    if (!updated) return;
-    const nextId = getAdjacentTestId(updated, dir);
-    if (nextId) goToTest(nextId);
-  }, [goToTest, sessionId]);
+  const moveTest = useCallback(
+    (dir: 'prev' | 'next') => {
+      if (!session || !currentTestId) return;
+      const nextId = getAdjacentTestId(session, currentTestId, dir);
+      if (nextId) {
+        setCurrentTestId(nextId);
+        if (!isTablet) closeSidebar();
+      }
+    },
+    [closeSidebar, currentTestId, isTablet, session],
+  );
+
+  const onComplete = useCallback(async () => {
+    try {
+      setSaving(true);
+      await completeSession(sessionId);
+      navigation.replace('SessionSummary', { sessionId });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setErrorText(`Error ${error.status}: ${error.message}`);
+      } else {
+        setErrorText('No se pudo completar la sesión.');
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [navigation, sessionId]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={s.center} edges={['top']}>
+        <ActivityIndicator size="small" color={C.primary} />
+        <Text style={s.centerText}>Cargando sesión...</Text>
+      </SafeAreaView>
+    );
+  }
 
   if (!session || !currentTest) {
     return (
-      <View style={s.errorScreen}>
+      <SafeAreaView style={s.center} edges={['top']}>
         <Text style={s.errorTitle}>Sesión no encontrada</Text>
-        <Text style={s.errorSub}>No se pudo cargar la sesión solicitada.</Text>
-      </View>
+        <Text style={s.centerText}>No se pudo cargar la sesión solicitada.</Text>
+      </SafeAreaView>
     );
   }
 
@@ -106,7 +193,10 @@ export function TestExecutionScreen({ navigation, route }: Props) {
     <SidebarPanel
       sections={sections}
       currentTestId={currentTest.id}
-      onSelect={goToTest}
+      onSelect={(id) => {
+        setCurrentTestId(id);
+        if (!isTablet) closeSidebar();
+      }}
       onClose={!isTablet ? closeSidebar : undefined}
     />
   );
@@ -115,7 +205,7 @@ export function TestExecutionScreen({ navigation, route }: Props) {
     <SafeAreaView style={s.root} edges={['top']}>
       <AppTopBar
         title={`Paciente ${session.patientId}`}
-        subtitle={`${session.scaleName} · Prueba ${currentIndex + 1}/${session.tests.length}`}
+        subtitle={`${session.scaleCode} · Prueba ${currentIndex + 1}/${session.tests.length}`}
         left={!isTablet ? (
           <Pressable onPress={openSidebar} style={s.menuBtn} hitSlop={10}>
             <View style={s.burger}>
@@ -127,7 +217,7 @@ export function TestExecutionScreen({ navigation, route }: Props) {
         ) : undefined}
         right={(
           <View style={s.pill}>
-            <View style={[s.pillFill, { width: `${progress.percent}%` as any }]} />
+            <View style={[s.pillFill, { width: `${progress.percent}%` as never }]} />
             <Text style={s.pillText}>{progress.percent}%</Text>
           </View>
         )}
@@ -135,13 +225,8 @@ export function TestExecutionScreen({ navigation, route }: Props) {
 
       <View style={s.body}>
         {isTablet && <View style={s.tabletSidebar}>{sidebarPanel}</View>}
-
-        <ScrollView
-          style={s.scroll}
-          contentContainerStyle={s.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
+          {errorText ? <Text style={s.inlineError}>{errorText}</Text> : null}
           <View style={s.card}>
             <View style={s.cardHead}>
               <View style={s.sectionPill}>
@@ -161,37 +246,24 @@ export function TestExecutionScreen({ navigation, route }: Props) {
             <Text style={s.cardLabel}>Puntuación</Text>
             <View style={s.cardInner}>
               <View style={s.scoreRow}>
-                {SCORE_OPTIONS.map(score => {
+                {currentTest.scoreOptions.map((score) => {
                   const active = currentTest.score === score;
                   return (
-                    <Pressable
-                      key={score}
-                      onPress={() => {
-                        updateSessionTest(sessionId, currentTest.id, { score });
-                        refresh();
-                      }}
-                      style={[s.scoreBtn, active && s.scoreBtnOn]}
-                    >
+                    <Pressable key={score} onPress={() => void saveScore(score)} style={[s.scoreBtn, active && s.scoreBtnOn]}>
                       <Text style={[s.scoreBtnTxt, active && s.scoreBtnTxtOn]}>{score}</Text>
                     </Pressable>
                   );
                 })}
               </View>
-
               <TextInput
                 value={noteDraft}
                 onChangeText={setNoteDraft}
-                onBlur={() => {
-                  updateSessionTest(sessionId, currentTest.id, { note: noteDraft });
-                  refresh();
-                }}
-                placeholder="Nota clínica opcional…"
+                onBlur={() => void saveNote()}
+                placeholder="Nota clínica opcional..."
                 placeholderTextColor={C.textSecondary}
                 multiline
-                textAlignVertical="top"
                 style={s.noteInput}
               />
-
               <View style={s.navRow}>
                 <Pressable style={[s.navBtn, s.navOutline]} onPress={() => moveTest('prev')}>
                   <Text style={[s.navTxt, s.navTxtOutline]}>← Anterior</Text>
@@ -214,26 +286,16 @@ export function TestExecutionScreen({ navigation, route }: Props) {
       </View>
 
       <View style={s.bottomBar}>
-        <Pressable
-          style={[s.actBtn, s.actOutline]}
-          onPress={() => {
-            setSessionStatus(sessionId, 'PAUSED');
-            navigation.navigate('SessionPause', { sessionId });
-          }}
-        >
+        <Pressable style={[s.actBtn, s.actOutline]} onPress={() => navigation.navigate('SessionPause', { sessionId })}>
           <Text style={[s.actTxt, s.actTxtOutline]}>⏸ Pausa</Text>
         </Pressable>
         <View style={s.bottomCenter}>
-          <Text style={s.bottomInfo}>{progress.completed}/{progress.total} pruebas</Text>
+          <Text style={s.bottomInfo}>
+            {progress.completed}/{progress.total} pruebas
+          </Text>
         </View>
-        <Pressable
-          style={[s.actBtn, s.actFilled]}
-          onPress={() => {
-            setSessionStatus(sessionId, 'COMPLETED');
-            navigation.navigate('SessionSummary', { sessionId });
-          }}
-        >
-          <Text style={[s.actTxt, s.actTxtFilled]}>Resumen ✓</Text>
+        <Pressable style={[s.actBtn, s.actFilled]} onPress={() => void onComplete()} disabled={saving}>
+          <Text style={[s.actTxt, s.actTxtFilled]}>{saving ? 'Guardando...' : 'Resumen ✓'}</Text>
         </Pressable>
       </View>
 
@@ -257,17 +319,17 @@ function SidebarPanel({
   onSelect,
   onClose,
 }: {
-  sections: any[];
+  sections: ReturnType<typeof getSessionSections>;
   currentTestId: string;
   onSelect: (id: string) => void;
   onClose?: () => void;
 }) {
   return (
     <SidebarShell title="Escala" onClose={onClose}>
-      {sections.map((section: any) => (
+      {sections.map((section) => (
         <View key={section.id} style={sb.section}>
           <Text style={sb.sectionLabel}>{section.name}</Text>
-          {section.tests.map((test: any, index: number) => {
+          {section.tests.map((test, index) => {
             const active = test.id === currentTestId;
             const completed = test.score !== null;
             return (
@@ -275,12 +337,14 @@ function SidebarPanel({
                 <View style={[sb.idx, active && sb.idxActive]}>
                   <Text style={[sb.idxTxt, active && sb.idxTxtActive]}>{index + 1}</Text>
                 </View>
-                <Text style={[sb.rowName, active && sb.rowNameActive]} numberOfLines={2}>{test.name}</Text>
-                {completed && (
+                <Text style={[sb.rowName, active && sb.rowNameActive]} numberOfLines={2}>
+                  {test.name}
+                </Text>
+                {completed ? (
                   <View style={sb.checkWrap}>
                     <Text style={sb.checkTxt}>✓</Text>
                   </View>
-                )}
+                ) : null}
               </Pressable>
             );
           })}
@@ -292,6 +356,10 @@ function SidebarPanel({
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bgBase },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bgBase, gap: 8 },
+  centerText: { fontSize: 14, color: C.textSecondary, textAlign: 'center' },
+  errorTitle: { fontSize: 18, color: C.textPrimary, fontWeight: '700' },
+  inlineError: { color: C.error, fontWeight: '600' },
   menuBtn: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
   burger: { gap: 4 },
   burgerLine: { width: 20, height: 2, backgroundColor: C.white, borderRadius: 1 },
@@ -352,11 +420,10 @@ const s = StyleSheet.create({
     paddingBottom: 2,
   },
   cardInner: { padding: 14, gap: 10 },
-  scoreRow: { flexDirection: 'row', gap: 8 },
+  scoreRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   scoreBtn: {
-    flex: 1,
-    aspectRatio: 1,
-    maxWidth: 62,
+    width: 56,
+    height: 56,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 10,
@@ -416,9 +483,6 @@ const s = StyleSheet.create({
     backgroundColor: C.bgSurface,
     ...elev(12),
   },
-  errorScreen: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bgBase, padding: 32 },
-  errorTitle: { fontSize: 20, fontWeight: '700', color: C.textPrimary, marginBottom: 8 },
-  errorSub: { fontSize: 15, color: C.textSecondary, textAlign: 'center' },
 });
 
 const sb = StyleSheet.create({

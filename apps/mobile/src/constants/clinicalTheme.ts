@@ -55,7 +55,14 @@ export function withAlpha(color: string, alpha: string) {
 }
 
 export function getCaptureStatusColor(status: string) {
-  if (status === 'COMPLETED' || status === 'DONE' || status === 'READY' || status === 'AVAILABLE') {
+  if (
+    status === 'COMPLETED' ||
+    status === 'DONE' ||
+    status === 'READY' ||
+    status === 'AVAILABLE' ||
+    status === 'completed' ||
+    status === 'in_progress'
+  ) {
     return CLINICAL_COLORS.success;
   }
   if (status === 'ERROR') {
@@ -66,6 +73,10 @@ export function getCaptureStatusColor(status: string) {
 
 export function getCaptureStatusLabel(status: string) {
   const map: Record<string, string> = {
+    in_progress: 'En curso',
+    completed: 'Completada',
+    draft: 'Borrador',
+    cancelled: 'Cancelada',
     COMPLETED: 'Completado',
     DONE: 'Listo',
     READY: 'Listo',

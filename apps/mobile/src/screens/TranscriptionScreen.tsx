@@ -1,7 +1,7 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-
 import { AppTopBar } from '@/components/common/AppTopBar';
 import { CaptureStatusPill } from '@/components/common/CaptureStatusPill';
 import { InfoCell, InfoGrid } from '@/components/common/InfoGrid';
@@ -13,23 +13,60 @@ import {
   withAlpha,
 } from '@/constants/clinicalTheme';
 import type { RootStackParamList } from '@/navigation/types';
+import { ApiError } from '@/services/apiClient';
 import { formatDuration, getSessionById } from '@/services/sessionService';
+import type { Session } from '@/types/session';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Transcription'>;
 
 export function TranscriptionScreen({ navigation, route }: Props) {
   const { sessionId, testId } = route.params;
-  const session = getSessionById(sessionId);
-  const test = session?.tests.find(item => item.id === testId);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [errorText, setErrorText] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      setErrorText(null);
+      const data = await getSessionById(sessionId);
+      setSession(data);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setErrorText(`Error ${error.status}: ${error.message}`);
+      } else {
+        setErrorText('No se pudo cargar la transcripción.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const test = useMemo(() => session?.tests.find((item) => item.id === testId), [session, testId]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <AppTopBar title="Transcripción" onBack={() => navigation.goBack()} />
+        <View style={s.errorScreen}>
+          <ActivityIndicator size="small" color={C.primary} />
+          <Text style={s.errorSub}>Cargando datos...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (!session || !test) {
     return (
       <SafeAreaView style={s.root} edges={['top']}>
         <AppTopBar title="Transcripción" onBack={() => navigation.goBack()} />
         <View style={s.errorScreen}>
-          <Text style={s.errorIcon}>📄</Text>
           <Text style={s.errorTitle}>Sin datos</Text>
-          <Text style={s.errorSub}>No hay transcripción disponible para esta prueba.</Text>
+          <Text style={s.errorSub}>{errorText ?? 'No hay transcripción disponible para esta prueba.'}</Text>
           <Pressable style={s.errorBtn} onPress={() => navigation.goBack()}>
             <Text style={s.errorBtnTxt}>Volver</Text>
           </Pressable>
@@ -74,12 +111,12 @@ export function TranscriptionScreen({ navigation, route }: Props) {
         <View style={s.card}>
           <View style={s.transcriptHeader}>
             <Text style={s.cardLabel}>Transcripción</Text>
-            {hasText && (
+            {hasText ? (
               <View style={[s.readyBadge, { borderColor: withAlpha(sttColor, '44'), backgroundColor: withAlpha(sttColor, '12') }]}>
                 <View style={[s.readyDot, { backgroundColor: sttColor }]} />
                 <Text style={[s.readyTxt, { color: sttColor }]}>{getCaptureStatusLabel(test.transcription.status)}</Text>
               </View>
-            )}
+            ) : null}
           </View>
 
           <View style={s.transcriptBody}>
@@ -90,7 +127,7 @@ export function TranscriptionScreen({ navigation, route }: Props) {
                 <Text style={s.transcriptEmptyIcon}>{test.transcription.status === 'PENDING' ? '⏳' : '⚠️'}</Text>
                 <Text style={s.transcriptEmptyTxt}>
                   {test.transcription.status === 'PENDING'
-                    ? 'La transcripción está en proceso…'
+                    ? 'La transcripción está en proceso...'
                     : 'No hay texto de transcripción disponible.'}
                 </Text>
               </View>
@@ -106,8 +143,6 @@ export function TranscriptionScreen({ navigation, route }: Props) {
             </View>
           </View>
         ) : null}
-
-        <View style={{ height: 12 }} />
       </ScrollView>
 
       <View style={s.bottomBar}>
@@ -188,7 +223,6 @@ const s = StyleSheet.create({
   actTxt: { fontSize: 14, fontWeight: '700' },
   actTxtOutline: { color: C.secondary },
   errorScreen: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32, gap: 8 },
-  errorIcon: { fontSize: 40, marginBottom: 4 },
   errorTitle: { fontSize: 20, fontWeight: '700', color: C.textPrimary },
   errorSub: { fontSize: 14, color: C.textSecondary, textAlign: 'center', lineHeight: 20 },
   errorBtn: { marginTop: 16, backgroundColor: C.primary, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 },
