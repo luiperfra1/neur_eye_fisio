@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CLINICAL_COLORS, elev } from '@/constants/clinicalTheme';
+import { UserMenu } from '@/components/common/UserMenu';
 
 type AppTopBarProps = {
   title: string;
@@ -23,7 +24,10 @@ export function AppTopBar({ title, subtitle, left, right, onBack }: AppTopBarPro
         <Text style={styles.title} numberOfLines={1}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
       </View>
-      {right ?? <View style={styles.placeholder} />}
+      <View style={styles.rightZone}>
+        {right ?? null}
+        <UserMenu compact />
+      </View>
     </View>
   );
 }
@@ -41,7 +45,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, justifyContent: 'center', alignItems: 'center' },
   backIcon: { fontSize: 28, color: CLINICAL_COLORS.white, lineHeight: 32, marginTop: -2 },
   center: { flex: 1 },
+  rightZone: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontSize: 15, fontWeight: '700', color: CLINICAL_COLORS.white },
   subtitle: { fontSize: 12, color: 'rgba(255,255,255,0.72)', marginTop: 1 },
-  placeholder: { width: 36, height: 36 },
 });

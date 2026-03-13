@@ -4,6 +4,31 @@ import { login as loginRequest, type AuthUser } from '@/services/authService';
 import { setApiAccessToken, setUnauthorizedHandler } from '@/services/apiClient';
 import { clearAccessToken, loadAccessToken, saveAccessToken } from '@/services/tokenStorage';
 
+// ── Decodifica el payload del JWT sin verificar firma (solo en cliente) ──────
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    // atob no existe en React Native — usamos Buffer o base64 manual
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=');
+    const decoded = Buffer.from(padded, 'base64').toString('utf8');
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function userFromToken(token: string): AuthUser | null {
+  const payload = decodeJwtPayload(token);
+  if (!payload) return null;
+  const id = typeof payload.sub === 'string' ? payload.sub : String(payload.sub ?? '');
+  const username = typeof payload.username === 'string' ? payload.username : '';
+  if (!id || !username) return null;
+  return { id, username };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 type AuthContextValue = {
   isReady: boolean;
   isAuthenticated: boolean;
@@ -20,11 +45,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
 
+  // Al arrancar: restaura token Y reconstruye user desde el payload JWT
   useEffect(() => {
     void (async () => {
       const token = await loadAccessToken();
-      setAccessToken(token);
-      setApiAccessToken(token);
+      if (token) {
+        const restoredUser = userFromToken(token);
+        setAccessToken(token);
+        setApiAccessToken(token);
+        setUser(restoredUser); // ← antes esto no ocurría
+      }
       setIsReady(true);
     })();
   }, []);
@@ -54,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setApiAccessToken(null);
     setAccessToken(null);
     setUser(null);
+    // El navigator detecta isAuthenticated === false y redirige solo
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -73,8 +104,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 }

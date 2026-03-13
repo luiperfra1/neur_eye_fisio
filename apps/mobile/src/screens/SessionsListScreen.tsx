@@ -16,6 +16,7 @@ import { ApiError } from '@/services/apiClient';
 import { listSessions } from '@/services/sessionService';
 import type { RootStackParamList } from '@/navigation/types';
 import type { Session } from '@/types/session';
+import { UserMenu } from '@/components/common/UserMenu';
 import {
   SessionFilters,
   DEFAULT_FILTERS,
@@ -165,9 +166,12 @@ export function SessionsListScreen({ navigation }: Props) {
           <Text style={s.topTitle}>Sesiones</Text>
           <Text style={s.topSub}>Unidad de fisioterapia neurológica</Text>
         </View>
-        <Pressable style={s.newBtn} onPress={() => navigation.navigate('CreateSession')}>
-          <Text style={s.newBtnTxt}>+ Nueva</Text>
-        </Pressable>
+        <View style={s.topActions}>
+          <Pressable style={s.newBtn} onPress={() => navigation.navigate('CreateSession')}>
+            <Text style={s.newBtnTxt}>+ Nueva</Text>
+          </Pressable>
+          <UserMenu />
+        </View>
       </View>
 
       <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>
@@ -344,6 +348,7 @@ const s = StyleSheet.create({
     ...elev(4),
   },
   topCenter: { flex: 1 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   topTitle: { fontSize: 17, fontWeight: '800', color: C.white },
   topSub: { fontSize: 12, color: 'rgba(255,255,255,0.72)', marginTop: 1 },
   newBtn: {
