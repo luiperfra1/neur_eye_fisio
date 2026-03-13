@@ -8,15 +8,19 @@ interface ScreenLayoutProps {
   title: string;
   subtitle?: string;
   children: ReactNode;
+  footer?: ReactNode;
 }
 
-export function ScreenLayout({ title, subtitle, children }: ScreenLayoutProps) {
+export function ScreenLayout({ title, subtitle, children, footer }: ScreenLayoutProps) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScreenHeader title={title} subtitle={subtitle} />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.content}>{children}</View>
-      </ScrollView>
+      <View style={styles.contentArea}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View style={styles.content}>{children}</View>
+        </ScrollView>
+        {footer}
+      </View>
     </SafeAreaView>
   );
 }
@@ -25,6 +29,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  contentArea: {
+    flex: 1,
   },
   scrollContent: {
     padding: LAYOUT.contentPadding,

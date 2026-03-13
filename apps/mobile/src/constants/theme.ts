@@ -24,6 +24,11 @@ export const STATUS_COLORS = {
   IN_PROGRESS: COLORS.warning,
   PAUSED: COLORS.info,
   DRAFT: COLORS.textMuted,
+  AVAILABLE: COLORS.success,
+  NOT_RECORDED: COLORS.textMuted,
+  READY: COLORS.success,
+  PENDING: COLORS.warning,
+  EMPTY: COLORS.textMuted,
 };
 
 export const SPACING = {

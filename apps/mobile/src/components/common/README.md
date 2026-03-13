@@ -4,6 +4,7 @@ Componentes reutilizables de presentacion para el MVP.
 
 - `ScreenHeader.tsx`
 - `ScreenLayout.tsx`
+- `ClinicalFooter.tsx`
 - `SectionCard.tsx`
 - `InfoRow.tsx`
 - `StatusBadge.tsx`
